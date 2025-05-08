@@ -2368,7 +2368,7 @@ Elasticsearch（ES）是一款开源的分布式搜索和分析引擎，基于�
 
 **负载均衡** 我们进行反向代理的时候其实并不是指定哪些服务器和端口，往往是进行动态调整的所以我们可以将访问负载均衡地发送到网关服务器，然后由网关实现对服务器进行操作，这样就实现了动态调整从而增加了系统的灵活性。
 
-![图片描述](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1746487380863.jpg?Expires=1746487876&OSSAccessKeyId=TMP.3KmTBcrL4L7KubUXvVc74agDrM2MZxLVCqAopUy4nx59ui2Nya9rLYGYoz9aDz3Nt4mfSkobaNnHNnEDDhsejw1LennL6y&Signature=QY9XWrKbvtLLI4KgDC3blkkdSuM%3D)
+![图片描述](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1746487380863.jpg)
 
 ### 性能测压
 
@@ -2416,12 +2416,15 @@ Elasticsearch（ES）是一款开源的分布式搜索和分析引擎，基于�
 - 延迟双删策略  **核心原理**：更新数据库前后各删除一次缓存，第二次延迟执行以减少并发不一致窗口。**优缺点**：优点是降低脏数据概率；缺点是延迟时间难以精准设定，且无法完全消除不一致。**优化与场景**：通过监听数据库Binlog（如Canal）触发二次删除，或结合消息队列实现延迟。适用于用户信息更新后高频读取的场景。
 - 删除缓存重试机制  **核心原理**：缓存删除失败时按策略（如指数退避）重试，确保最终一致性。**优缺点**：提高删除可靠性，但重试可能阻塞其他操作，增加系统复杂度。**优化与场景**：结合消息队列异步处理重试，设置最大重试次数和超时机制。适用于网络不稳定或缓存服务短暂不可用的情况。
 - 监听并读取biglog异步删除缓存  **核心原理**：订阅数据库Binlog变更事件（如Canal），异步触发缓存删除或更新。**优缺点**：优点是解耦业务与缓存逻辑，可靠性高；缺点是实现复杂，需维护监听组件，且存在异步延迟。**优化与场景**：通过消息持久化和消费端幂等处理保障数据最终一致，结合CDC工具（如Debezium）简化实现。适用于订单状态同步等需解耦的场景。
+- ![image-20250508133900302](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/image-20250508133900302.png)
+
+**SpringCache的使用**  Spring Cache是一个对缓存使用的抽象，它提供了多种存储集成。 要使用它们，需要简单地声明一个适当的 CacheManager - 一个控制和管理 Cache 的实体。
 
 ### 高并发
 
-![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1746487530925.jpg?Expires=1746487974&OSSAccessKeyId=TMP.3KmTBcrL4L7KubUXvVc74agDrM2MZxLVCqAopUy4nx59ui2Nya9rLYGYoz9aDz3Nt4mfSkobaNnHNnEDDhsejw1LennL6y&Signature=futisq2XwMTSZhUF1%2FQevqZF8R0%3D)
+![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1746487530925.jpg)
 
-![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1746487530944.jpg?Expires=1746487995&OSSAccessKeyId=TMP.3KmTBcrL4L7KubUXvVc74agDrM2MZxLVCqAopUy4nx59ui2Nya9rLYGYoz9aDz3Nt4mfSkobaNnHNnEDDhsejw1LennL6y&Signature=LV2y8DPxg5npLd97ECc8DBN4Ez0%3D)
+![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1746487530944.jpg)
 
 ### 熔断降级和限流
 
