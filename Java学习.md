@@ -2310,7 +2310,7 @@ Elasticsearch（ES）是一款开源的分布式搜索和分析引擎，基于�
 
 **框架**：在ES中和mysql一样不同库等价于索引（Index），不同表等价于类型（Type），不同数据等价于文档（document），不同列等价于属性。同时通过倒排索引机制实现检索功能，将检索到的关键字与存在该关键字的Type用一个额外的索引保存起来，从而实现检索的功能。在Kibana中会在安装的时候进行指定相关 的服务器，然后在内置的软件中可以进行数据可视化以及调试的功能。同时为了能和Java进行结合，需要在后端准备好全文检索的功能，通过使用ES官方提供的api从而实现新的微服务gulimall-search服务。
 
-### 商城业务
+### 商城业务-首页
 
 **商品上架** 众所周知上架商品的第一步就是需要将商品的信息进行上传，那么就需要进行考虑到商城页面中的全文检索，由于ES实现全文检索，同时还是利用内存的方式进行设计，虽然后期可以通过集群或者分布式的方式进行提高性能，但是在设计的时候是需要进行考虑到高并发的问题。一般有以下两种上传商品数据信息的方式。
 
@@ -2418,7 +2418,158 @@ Elasticsearch（ES）是一款开源的分布式搜索和分析引擎，基于�
 - 监听并读取biglog异步删除缓存  **核心原理**：订阅数据库Binlog变更事件（如Canal），异步触发缓存删除或更新。**优缺点**：优点是解耦业务与缓存逻辑，可靠性高；缺点是实现复杂，需维护监听组件，且存在异步延迟。**优化与场景**：通过消息持久化和消费端幂等处理保障数据最终一致，结合CDC工具（如Debezium）简化实现。适用于订单状态同步等需解耦的场景。
 - ![image-20250508133900302](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/image-20250508133900302.png)
 
-**SpringCache的使用**  Spring Cache是一个对缓存使用的抽象，它提供了多种存储集成。 要使用它们，需要简单地声明一个适当的 CacheManager - 一个控制和管理 Cache 的实体。
+**SpringCache的使用**  Spring Cache是一个对缓存使用的抽象，它提供了多种存储集成。 要使用它们，需要简单地声明一个适当的 CacheManager - 一个控制和管理 Cache 的实体。如何进行使用呢，再IDEA中进行导入相关的依赖，然后进行配置文件设置由于cache是为每一个类型的缓存都进行便利性准备，所以只需要在resource中设置配置文件并标明使用哪种缓存，然后在启动类前加上@EnableCaching，基本步骤就准备好了，当我们需要进行使用缓存的时候只需要在需要缓存的方法前加上注解@Cacheable（“A”，“B”），这就说明将该函数的返回值放入叫做A和B的redis缓存中进行保存，当再次访问这个函数的时候就不会进行调用该代码块而是去redis中进行寻找（默认情况下会由系统生成对应的键值对并按照这个默认的键进行查找redis）。
+
+**优缺点** SpringCache的优点就是方便我们进行开发并且使用缓存，包括进行不同的读写操作双写模式、旁路缓存模式、读写穿透模式等等，但是缺点一样很明显，SpringCache是一个在单机环境中使用缓存的工具，其默认操作缓存不使用锁，而且就算开启锁也只能开启本地锁进行操作，没有办法进行分布式锁的操作。（其实SpringCache的优先选择ConcurrentMap作为缓存，而这种数据结构本质上就是在单机环境中进行并发操作）。
+
+### 商城业务-核心
+
+**检索服务** 通过构造页面信息VO类，然后在检索url里面提取json文件通过ES全文检索并生成VO类的实体，再通过一定方法将信息在检索页面中进行展示。
+
+**异步操作** 通过线程池TreadPoolExecutor()函数进行生成和管理线程从而避免大量额外时间的开销，通过CompletableFuture进行异步编排。什么是JUC其就是Java并发编程的概念，以上的概念大多数来自于JUC，除了线程的创建管理还有一系列锁的认识和使用。
+
+**商品详细页面** 这个页面主要是通过检索服务页面中的商品链接的url进行跳转，当用户点击url将会携带该sku信息，并且商品详细页面还需要提供sku的组合切换，那么这个地方就需要进行大量的并发操作，这种并发操作可以通过异步编程的方式进行提高效率，通过线程池进行分配线程实现异步操作，同时按照业务逻辑将部分业务进程按照回调函数的顺序进行，这样就实现了既高效又便利地控制多线程实现并发操作从而完成异步操作实现性能提高。
+
+```java
+@Override
+    public SkuItemVo item(Long skuId) throws ExecutionException, InterruptedException {
+
+        SkuItemVo vo = new SkuItemVo();
+        CompletableFuture<SkuInfoEntity> infoFuture = CompletableFuture.supplyAsync(() -> {
+            //1.sku基本信息获取
+            SkuInfoEntity skuInfoEntity = getById(skuId);
+//            Long catalogId = skuInfoEntity.getCatalogId();
+            vo.setInfo(skuInfoEntity);
+
+            return skuInfoEntity;
+        }, executor);
+
+        CompletableFuture<Void> saleAttrFuture = infoFuture.thenAcceptAsync((res) -> {
+            //3.spu的销售属性
+            List<SkuItemSaleAttrVo> skuSaleAttrValueEntities =
+                    skuSaleAttrValueService.getSkuSaleAttrBySpuId(res.getSpuId());
+            vo.setSaleAttr(skuSaleAttrValueEntities);
+        }, executor);
+
+        CompletableFuture<Void> descFuture = infoFuture.thenAcceptAsync((res) -> {
+            //4.spu介绍
+            SpuInfoDescEntity spuDesc = spuInfoDescService.getById(res.getSpuId());
+            vo.setDesc(spuDesc);
+        }, executor);
+
+        CompletableFuture<Void> groupAttrsFuture = infoFuture.thenAcceptAsync((res) -> {
+            //5.规则参数信息
+            List<SpuItemAttrGroupAttrVo> groupAttrs = attrGroupService.getAttrGroupBySpuId(res.getSpuId(), res.getCatalogId());
+            vo.setGroupAttrs(groupAttrs);
+        }, executor);
+
+        CompletableFuture<Void> imagesFuture = CompletableFuture.runAsync(() -> {
+            //2.sku图片信息
+            List<SkuImagesEntity> images = skuImagesService.getImagesById(skuId);
+            vo.setImages(images);
+        }, executor);
+
+        CompletableFuture.allOf(saleAttrFuture,descFuture,groupAttrsFuture,imagesFuture).get();
+
+        return vo;
+    }
+```
+
+**认证服务** 和首页、检索以及商品详细页面一样，通过静态代码保存在nginx，使用前后端不分离技术将认证相关的登录和注册服务创建新的微服务，同时创建跳转页面的控制层、服务层以及服务实现层。注册页面的核心就是如何进行注册，其中需要为每一个用户提供唯一辨识，这里使用手机号进行注册，再前端中进行设置验证码的倒计时再通过阿里云提供的短信服务api简单实现通过验证码的手机唯一辨识进行注册账号。
+
+**如何进行验证码防刷校验** 基本上就两个问题，问题一由于网页可以重刷所以保存的信息重刷就消失了，那么就又可能用户会恶意用同一个手机号码进行不断发送验证码，这种情况在服务器页面中进行保存变量就不可以了，我们可以在redis这样的中间层缓存中进行保存手机号码和验证码以及发送验证码时间，当短时间内进行重新发送的时候进行查看redis进行校验就可以避免，而且带有时间戳所以可以在固定时间内进行设置校验什么时候可以重新发送验证码。问题二就是在前端的控制面板可以看到接口代码，有可能被用户进行恶意地接口重刷TODO
+
+**如何保存用户信息到member微服务** 用户注册成功之后就需要将数据保存到数据库中，通过在注册页面进行保存用户信息VO调用第三方服务进行在member的微服务中进行保存数据信息。
+
+**如何进行保存用户的密码** 
+
+- MD5加密，Message Digest algorithm 5，apache提供的信息摘要算法，压缩性可以满足任意长度的数据，算出的MD5值长度都是固定的。同时容易计算，可以从原数据计算出MD5值很容易。并且抗修改性高，对原数据进行任何改动，哪怕只修改1个字节，所得到的MD5值都有很大区别。而且强抗碰撞强，想找到两个不同的数据，使它们具有相同的MD5值，是非常困难的。
+- 加盐，通过生成随机数与MD5生成字符串进行组合，需要数据库同时存储MD5值与salt值。验证正确性时使用salt进行MD5即可。
+- BCryptPasswordEncoder进行实现，通过使用Spring Security的BCryptPasswordEncoder进行加密存储用户密码，然后当用户输入密码的时候将其明文密码和数据库中存储的密文进行matches操作得出布尔变量结果进行判断是否存在进行登录，注意BCryptPasswordEncoder使用的也是加盐的操作概率。
+
+**社交登录**
+
+通过OAuth2.0实现社交登录，用户除了通过上面的账户密码进行登录，也可以通过第三方的社交软件进行登录，比如csdn作为第三方软件应用向QQ、微信或者微博进行申请授权进行登录，通过以下的流程进行登录。
+
+![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1746869131864.jpg)
+
+详细步骤就是用户点击社会认证链接，而该链接是由开发人员在第三方开发平台中进行申请得到的，用户在链接中进行认证并且通过认证之后开发平台会将带有访问令牌的url进行重定向到开发服务器，这个也是由开发人员在开发平台定义，这个时候开发人员就可以在后端进行处理该请求并且将带有的访问令牌和一些相关信息包装起来去访问开发平台的相关api，成功之后会将用户的相关信息进行返回这个时候我们就可以进行处理用户的社会登录了。**注意：**这个时候一般需要进行判断用户是否为第一次进行登录，用一个社会登录的变量进行存储，登录成功之后进行查看如果是第一次登录就进行注册操作，而不是第一次登录那就取出用户信息进行正常登录。
+
+**会话以及相关的操作问题**  首先**会话Session**指得是会话是用户与系统（如网站、软件）交互过程中，用于存储和共享跨请求 / 页面状态信息（如登录凭证、操作数据）的上下文记录，确保交互的连续性和状态一致性。但是原生的session是由Servlet 容器（如 Tomcat）进行提供，这种session会将信息保存在当前服务器的内存中，然后后续再次访问服务器的时候就会携带该会话的唯一id，服务器就会根据id进行数据读取从而保证数据的一致性。但是原生session有以下的问题
+
+- 数据一致性问题 由于保存在服务器内存中，当项目部署了负载均衡的中间件以及出现单点失效的情况时都会丢失会话信息
+- 跨域/子域问题 当项目中的一个子域名跳转到另外一个子域名，实现跨域操作的时候也会找不到会话信息
+
+**SpringSession** 是 Spring 生态系统中的一个项目，旨在简化分布式会话管理。它为 web 应用提供了跨多个服务或实例的会话一致性解决方案，使得在微服务架构或集群环境中管理用户会话变得更加容易。其提供了三种方式进行处理会话，从而解决了三个问题，其一为在SpringSession中使用了redis来进行保存cookies信息也就是会话信息，这样就可以允许实现负载均衡的时候也能处理用户发来带有会话信息的请求，其二就是在Springsession中可以为session进行设置配置信息，将cookies的数据信息的区域设置成父域名，这样即使是子域名的跨域问题也可以进行处理而不会出错，第三点就是在session中进行传输数据是通过jdk的序列化和反序列化进行的，在springsession中通过设置配置类就可以通过json的方式进行传递参数而免去了进行序列化等复杂操作。
+**SpringSession核心原理**  @EnableRedisHttpSession导入RedisHttpSessionConfiguration配置
+
+- 1、给容器中添加了一个组件SessionRepository =>>>[RedisOperationsSessionRepository]==>redis操作session。 session的增删改查封装类
+
+- 2、SessionRepositoryFilter==>Filter: session存储过滤器;每个请求过来都必须经过filter
+
+​		a、创建的时候，就自动从容器中获取到了SessionRepository;
+
+​		b、原始的request,response都被包装。SessionRepositoryRequestWrapper,SessionRepositoryResponseWrapper
+
+​		c、以后获取session。request.getSession();
+
+​		//SessionRepositoryRequestWrapper
+
+​		d、wrappedRequest.getSession();===>SessionRepository 中获取到的。
+
+
+
+![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1746884058281.jpg)
+
+**单点登录**
+
+能实现单点登录的方式就三种分别是分布式session、CAS中央认证服务器（通过cookie实现）、JWT，但是分布式session无法实现不同父级域名进行免登录，所以这里讲讲第二中方式。
+
+![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1746931559571.jpg)
+
+还有一种就是通过JWT进行实现，**JWT（JSON Web Token）** 是一种由头部（算法信息）、载荷（用户数据）和签名（防篡改）三部分组成的无状态令牌，通过签名确保数据安全。在单点登录（SSO）中，用户首次登录认证中心后，服务器生成包含用户身份和有效期的 JWT 并返回给客户端；后续访问其他系统时，客户端在请求头（如 `Authorization: Bearer <token>`）中携带该令牌，各系统独立验证签名及有效期后直接授权，无需依赖中心化会话存储。JWT 的跨域传递能力使其天然支持不同域名系统的无缝跳转，而无需重复登录。其无状态特性简化了分布式架构的复杂度，但需配合 HTTPS 传输和短有效期设置，以防范令牌泄露风险，从而在便捷与安全间实现高效平衡。
+
+**购物车功能** 实现购物车主要通过前后端不分离进行页面环境搭建，在将实际情况进行创建VO类，最后将每个页面信息和购物车进行结合即可实现该部分的基本功能。
+
+**Threadload应用-在购物车功能中保存用户信息** 在该部分首先我们需要知道线程创建除了显示创建（new thread）以外还会有隐性创建，比如**HTTP 请求处理**（Tomcat/Jetty 线程池）**数据库连接池维护**（HikariCP 后台线程）**异步任务与定时任务**（`@Async`、`@Scheduled`）**消息队列监听**（RabbitMQ/Kafka 消费者线程）**缓存异步刷新**（Caffeine 线程池）**分布式锁管理**（Redisson Watchdog 线程）等，这里我们需要从第一种进行展开。由于使用VO进行保存用户信息类这就导致，每个不同的https请求处理都又可能会操作这个类的静态变量，由于请求处理是多线程的并发处理，这样就有可能会导致信息的错误。这个时候就需要通过Threadlocal进行保存用户信息类了，Threadlocal是一种map每个线程自己保存一个与其他的线程是互不打扰的，而这种业务中的用户信息一般会使用拦截器进行避免冗余的操作，我们就会拦截器中进行使用Threadlocal进行保存用户信息，这样就实现了和其他请求相互隔离，并且为线程后面使用用户信息提供了正确的信息。**注意：**有的时候我们会在这个地方使用双拦截器进行拦截，可以应用到比如权限认证等。
+
+**购物车的小bug** 这里主要是在添加购物车的时候，正常逻辑是进行访问请求在一个controller中进行处理业务，并且将信息返回同时进行跳转到添加成功页面，但是有一个问题就是当用户仅仅刷新该页面的时候就会直接将之前的业务请求进行重新加入购物车，这是肯定不对的购物车肯定不是刷新页面就可以直接进行添加。所以进行修改用两个请求进行解决，用户点击添加按钮，我们为用户进行业务逻辑处理并且处理结束之后仅仅将信息进行页面跳转而不进行业务处理，这样的话用户单单刷新页面就不会直接改变数据了，而只有点击添加购物车才会进行业务处理。**注意：**这里使用到了**RedirectAttribute**，RedirectAttribute 是 Spring MVC 框架提供的一种工具，用于在重定向（Redirect）时传递数据，而普通的重定向是 HTTP 协议的基础功能，仅实现页面跳转。两者的核心区别在于 数据传递的方式和安全性，在这个部分就可以每次重定向的时候进行使用而不用通过其他方式。
+
+### 消息队列-RabbitMQ
+
+**消息队列中间件**（Message Queue Middleware）是一种用于在分布式系统中实现异步通信的软件基础设施，其核心功能是**解耦服务之间的直接依赖**，**缓冲通信压力**，并**确保消息的可靠传输**。它通过提供消息的存储、路由、传递及管理能力，帮助不同服务或组件高效、安全地交换数据，从而提升系统的可扩展性、容错性和灵活性。
+
+- 削峰添谷
+- 异步处理
+- 应用解耦
+
+![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1746968873481.jpg)
+
+![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1746969026557.jpg?Expires=1746969355&OSSAccessKeyId=TMP.3KqCgXJFPLSGTD1pxyoDbP8KLcoYdTRPofCLRoc9QCY1TK7fAgwe94j3pKdH5oV4DPcMgcMgAWyxkscVq8Vkmp8H8kLnbp&Signature=iDdghNijw%2BtWSghTWcQjZ3ZgFYA%3D)
+
+![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1746969392596.jpg)
+
+**RabbitMQ**  是一款基于 AMQP 协议的开源消息中间件，充当消息代理（Broker），实现应用程序或服务间的异步通信与解耦。生产者（Publisher）创建带有路由键（Route - Key）的消息，经长连接和通道（Channel）发送至交换机（Exchange）；交换机依据绑定（Binding）规则，通过路由键将消息路由到对应队列（Queue）存储；消费者（Consumer）借助连接从队列获取并处理消息。虚拟主机（VHost，如 `/java`、`/php`）则提供逻辑隔离，区分不同应用资源。通过这些组件协作，RabbitMQ 确保消息可靠传输、精准路由与高效管理，提升系统灵活性、可扩展性，使应用间无需直接耦合，实现松耦合的异步处理。
+
+![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1746970606949.jpg)
+
+![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1747050592365.jpg)
+
+**注意：**这里的fanout扇出就差不多和广播相似，而topic主题就是按照发送数据的路由键是否匹配队列的路由键规则进行部分发送数据，而direct直接就是最经典的点对点的发送方式。
+
+**如何使用RabbitMQ操作** 首先需要在springboot中进行整合amqp驱动器，当你引入`spring-boot-starter-amqp`依赖时，它会自动包含 RabbitMQ 客户端库（`com.rabbitmq:amqp-client`），然后再在application.yml中进行配置相关接口和主机信息，这样后端就和中间件进行连接了。依赖中提供了rabbitmq的admin的组件操作，可以进行配置相关的交换机以及队列信息，使用template就可以进行简化我们发送消息的方式，通过上面的操作后端就可以进行使用rabbitmq了，同时我们还需要进行接收消息，利用提供的RabbitListener和RabbitHandler进行编辑接收消息的方式，从而可以进行在队列中进行接收消息，这里需要知道发送消息是讲数据进行发送到交换机上，而接收则是从队列中进行接收。**注意：**RabbitListener和RabbitHandler注解的区别就是前者是直接绑定接收消息的队列，后者是通过重写函数从而绑定接收消息类型，并且接受消息的时候所有消息之间是需要进行争夺资源的，并不是只要发送消息都一定会接受消息，如果一个队列有多个接受者，那么他们对于消息的接收就是资源争夺。
+
+**RabbitMQ是如何实现可靠性传输的** **RabbitMQ的可靠传输**是指通过生产者确认（Publisher Confirm）、消息持久化（持久化队列和消息）、消费者手动应答（Manual Acknowledgement）等机制，确保消息从生产者发送到Broker（中间件）再到消费者的全链路不丢失。生产者发送消息后需等待Broker确认写入磁盘，消费者处理完成后手动发送ACK告知Broker删除消息，若处理失败则触发重试或死信队列，从而在系统故障、网络波动等场景下保障数据一致性。
+
+![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1747099241782.png)
+
+![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1747099364349.jpg)
+
+![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1747099400643.jpg)
+
+![](https://md-file-zhaowei.oss-cn-beijing.aliyuncs.com/Java%E5%AD%A6%E4%B9%A0/1747099437819.jpg)
+
+
 
 ### 高并发
 
@@ -2442,6 +2593,10 @@ A服务调用B服务的某个功能，由于网络不稳定问题，或者B服�
 2、降级是基于全局考虑，停止一些正常服务，释放资源
 **限流**
 对打入服务的请求流量进行控制，使服务能够承担不超过自己能力的流量压力
+
+**Sentinel 是什么**
+
+随着[微服务](https://so.csdn.net/so/search?q=微服务&spm=1001.2101.3001.7020)的流行，服务和服务之间的稳定性变得越来越重要。Sentinel 是面向分布式服务架构的**轻量级**流量控制产品，主要以流量为切入点，从流量控制、熔断降级、系统负载保护等多个维度来帮助您保护服务的稳定性。
 
 ## 谷粒商城（高可用集群—框架师提升篇）
 
@@ -2809,6 +2964,10 @@ class Solution {
 
 在Java中有许许多多的锁来实现线程的并发操作，其主要分为三类内置锁、接口Lock实现的锁以及其他机制实现的锁。
 
+### **lammda表达式**
+
+通过简洁的表达式进行展示函数的具体运过程
+
 ## Spring
 
 ### AOP编程
@@ -2941,3 +3100,12 @@ public class Singleton {
 }
 ```
 
+# 投递情况
+
+美团
+
+字节
+
+小红书
+
+快手
