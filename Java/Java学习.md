@@ -52,7 +52,18 @@ Map<String, Object> params;
 List<CategoryBrandRelationEntity data;
 ```
 
+#### 输入输出
 
+这个部分是处于比较重要的地方，所以就放在了基础部分的最后一个，首先需要知道的是输入输出主要靠Sytem流，所以按照这两个进行介绍
+
+**输入：** 任何输出都需要进行通过Sytem.in构造Scanner对象，然后使用这个对象进行处理数据，下面介绍Scanner的所有api接口
+
+- nextInt()	读取下一个整数
+- nextLine()	读取一整行（包括空格）
+- hasNext()	检查是否存在下一个标记
+- hasNextLine()	检查是否存在下一行
+- useDelimiter()	设置分隔符
+- close()	关闭 Scanner 并释放资源
 
 ### 重点
 
@@ -916,6 +927,21 @@ ssh -T git@gitee.com								#查看远程仓库是否连接成功
 **创建项目微服务：**
 
 从gitee中初始化一个项目，然后复制其网址在IDEA中打开这个项目，为我们的项目创建一些相关的微服务包括商品服务、仓储服务、订单服务、优惠劵服务和用户服务，并均创建spring initialr项目设置相同的包名（com.atguigu.gulimall.xxxx）、java版本（推荐1.8）、Maven模板以及选择web、openfeign模块。这里注意设置spring-boot-starter-parent的时候版本最好选择2.1.8.RELEASE否则会报错，并且在sringinitialr的时候由于maven的设置也可以在pom文件中设置低版本的java。没有问题之后再将gulimall文件设置为总文件，在其文件夹下新建.pom文件，初始化后加入<models><model>将所有的微服务项目加入进去，这样就可以在root根目录中管理所有的微服务了，同时在.gitignore文件中加入无需更新的文件内容，这样在提交项目的时候就不会将垃圾文件上传，最后在plugin中下载gitee插件可以快速上传，在version control中将修改的数据加入到vs中并commit and push，成功之后在云端的gitee中就可以看到项目的更新。
+
+### 重启项目注意
+
+当我再次想启动项目的时候发现有许许多多的配置和插件无法使用
+
+**虚拟机启动：** 实际上虚拟机在VM virtualbox中可以进行创建，但是需要通过vagrant工具进行使用，由于之前就已经安装过了centos7系统，所以再次启动只用关系如何启动，首先想要使用虚拟机有两步即启动虚拟机和连接虚拟机，我们可以输入vagrant box list进行查看虚拟机是否还存在，然后启动虚拟机需要vagrantfile文件，可能在使用电脑的时候文件删除了，但是我们可以自己构造这个文件，cmd中输入vagrant init进行创建默认vagrantfile，然后修改其中的相关配置保存之后，输入vagrant up进行启动，然后输入vagrant ssh进行连接虚拟机就可以使用了。
+
+```shell
+vagrant box list
+vagrant init
+vagrant up
+vagrant ssh
+```
+
+**检查虚拟机中的软件：** 由于连接到的liunx系统中默认的是普通用户，而在liunx中大多数的操作都是需要管理员操作，通过sudo su root就可以进入管理员模式中，输入docker images可以查看所有的docker镜像，并且通过
 
 ### 快速开发
 
